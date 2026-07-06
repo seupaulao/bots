@@ -1,0 +1,1 @@
+# regra_de_3_bot

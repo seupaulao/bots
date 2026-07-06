@@ -1,0 +1,16 @@
+{
+  "name": "controle-assinatura-bot",
+  "version": "1.0.0",
+  "description": "Bot Telegram de controle de assinaturas",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "telegraf": "^4.16.3"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs"
+}

@@ -1,0 +1,22 @@
+{
+  "name": "biblia_rapida_bot",
+  "version": "1.0.0",
+  "description": "um bot de biblia para pesquisa e estudo",
+  "keywords": [
+    "bot",
+    "biblia",
+    "pesquisa"
+  ],
+  "license": "ISC",
+  "author": "paulo junior",
+  "type": "commonjs",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "dotenv": "^17.2.0",
+    "telegraf": "^4.16.3",
+    "telegraf-session-local": "^2.1.1"
+  }
+}

@@ -1,0 +1,62 @@
+services:
+  biblia-rapida-bot:
+    image: node:20-alpine
+    container_name: biblia-rapida-bot
+    working_dir: /app
+    command: sh -c "npm install && node index.js"
+    volumes:
+      - ./biblia_rapida_bot:/app
+      - ./.env:/app/.env:ro
+    env_file:
+      - ./.env
+    restart: unless-stopped
+    networks:
+      - app-network
+
+  regra-de-3-bot:
+    image: node:20-alpine
+    container_name: regra-de-3-bot
+    working_dir: /app
+    command: sh -c "npm install && node bot.js"
+    volumes:
+      - ./regra_de_3_bot:/app
+      - ./.env:/app/.env:ro
+    env_file:
+      - ./.env
+    restart: unless-stopped
+    networks:
+      - app-network
+
+  controle-assinaturas-backend:
+    image: python:3.12-slim
+    container_name: controle-assinaturas-backend
+    working_dir: /app
+    command: sh -c "pip install --no-cache-dir -r requirements.txt && uvicorn main:app --host 0.0.0.0 --port 8000"
+    volumes:
+      - ./controle-assinaturas:/app
+    ports:
+      - "8000:8000"
+    networks:
+      - app-network
+
+  controle-assinatura-bot:
+    image: node:20-alpine
+    container_name: controle-assinatura-bot
+    working_dir: /app
+    command: sh -c "npm install && node index.js"
+    volumes:
+      - ./controle-assinatura-bot:/app
+      - ./.env:/app/.env:ro
+    env_file:
+      - ./.env
+    environment:
+      - BACKEND_URL=http://controle-assinaturas-backend:8000
+    restart: unless-stopped
+    depends_on:
+      - controle-assinaturas-backend
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge

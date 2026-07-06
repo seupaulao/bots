@@ -1,0 +1,8 @@
+[
+  {"porcao":"ATGI","inicio":"GEN", "fim":"1KI"},
+  {"porcao":"ATGM","inicio":"2KI", "fim":"PSA"},
+  {"porcao":"ATGF","inicio":"PRO", "fim":"MAL"},
+  {"porcao":"NTGI","inicio":"MAT", "fim":"JOH"},
+  {"porcao":"NTGM","inicio":"ACT", "fim":"2TE"},
+  {"porcao":"NTGF","inicio":"1TI", "fim":"REV"}
+]  
