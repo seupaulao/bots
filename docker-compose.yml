@@ -28,10 +28,10 @@ services:
       - app-network
 
   controle-assinaturas-backend:
-    image: python:3.12-slim
+    image: node:20-alpine
     container_name: controle-assinaturas-backend
     working_dir: /app
-    command: sh -c "pip install --no-cache-dir -r requirements.txt && uvicorn main:app --host 0.0.0.0 --port 8000"
+    command: sh -c "npm install && node server.js"
     volumes:
       - ./controle-assinaturas:/app
     ports:
