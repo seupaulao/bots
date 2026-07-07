@@ -1,0 +1,23 @@
+{
+  "name": "atendimento_clinico_bot",
+  "version": "1.0.0",
+  "description": "",
+  "keywords": [
+    "atendimento",
+    "clinico",
+    "medico",
+    "agenda"
+  ],
+  "license": "ISC",
+  "author": "pjlaapps",
+  "type": "commonjs",
+  "main": "index.js",
+  "scripts": {
+    "test": "node bot.js"
+  },
+  "dependencies": {
+    "dotenv": "^17.2.1",
+    "telegraf": "^4.16.3",
+    "telegraf-session-local": "^2.1.1"
+  }
+}
