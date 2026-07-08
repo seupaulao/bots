@@ -33,7 +33,7 @@ services:
     working_dir: /app
     command: sh -c "npm install && node server.js"
     volumes:
-      - ./controle-assinaturas:/app
+      - ./controle-assinatura_backends:/app
     ports:
       - "8000:8000"
     networks:
