@@ -57,6 +57,38 @@ services:
     networks:
       - app-network
 
+  postgres-atendimento:
+    image: postgres:16-alpine
+    container_name: postgres-atendimento
+    environment:
+      POSTGRES_DB: atendimento_clinico
+      POSTGRES_USER: atendimento
+      POSTGRES_PASSWORD: atendimento123
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./atendimento_clinico_backend/banco.sql:/docker-entrypoint-initdb.d/banco.sql
+      - pgdata-atendimento:/var/lib/postgresql/data
+    networks:
+      - app-network
+
+  atendimento-clinico-backend:
+    build: ./atendimento_clinico_backend
+    container_name: atendimento-clinico-backend
+    ports:
+      - "8001:8000"
+    environment:
+      - DATABASE_URL=postgres://atendimento:atendimento123@postgres-atendimento:5432/atendimento_clinico
+      - JWT_SECRET=seu-jwt-secret-aqui
+      - PORT=8000
+    depends_on:
+      - postgres-atendimento
+    networks:
+      - app-network
+
+volumes:
+  pgdata-atendimento:
+
 networks:
   app-network:
     driver: bridge

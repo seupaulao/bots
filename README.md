@@ -67,7 +67,3 @@ gerencia as assinaturas e serviços dos bots e aplicações
 
 **atendimento clinico - backend**
 
-faz toda a parte de atendimento clinico para os bots
-
-
-   
