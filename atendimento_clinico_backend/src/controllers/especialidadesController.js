@@ -1,7 +1,7 @@
-const pool = require('../config/database');
+const prisma = require('../config/database');
 
 async function list(request, reply) {
-  const { rows } = await pool.query('SELECT * FROM especialidades ORDER BY nome');
+  const rows = await prisma.especialidades.findMany({ orderBy: { nome: 'asc' } });
   return rows;
 }
 
@@ -10,13 +10,10 @@ async function create(request, reply) {
   if (!nome) return reply.status(400).send({ error: 'Nome é obrigatório' });
 
   try {
-    const { rows } = await pool.query(
-      'INSERT INTO especialidades (nome) VALUES ($1) RETURNING *',
-      [nome]
-    );
-    return reply.status(201).send(rows[0]);
+    const row = await prisma.especialidades.create({ data: { nome } });
+    return reply.status(201).send(row);
   } catch (err) {
-    if (err.code === '23505') return reply.status(409).send({ error: 'Especialidade já existe' });
+    if (err.code === 'P2002') return reply.status(409).send({ error: 'Especialidade já existe' });
     throw err;
   }
 }
@@ -27,23 +24,27 @@ async function update(request, reply) {
   if (!nome) return reply.status(400).send({ error: 'Nome é obrigatório' });
 
   try {
-    const { rows } = await pool.query(
-      'UPDATE especialidades SET nome = $1 WHERE id = $2 RETURNING *',
-      [nome, id]
-    );
-    if (rows.length === 0) return reply.status(404).send({ error: 'Especialidade não encontrada' });
-    return rows[0];
+    const row = await prisma.especialidades.update({
+      where: { id: Number(id) },
+      data: { nome },
+    });
+    return row;
   } catch (err) {
-    if (err.code === '23505') return reply.status(409).send({ error: 'Especialidade já existe' });
+    if (err.code === 'P2025') return reply.status(404).send({ error: 'Especialidade não encontrada' });
+    if (err.code === 'P2002') return reply.status(409).send({ error: 'Especialidade já existe' });
     throw err;
   }
 }
 
 async function remove(request, reply) {
   const { id } = request.params;
-  const { rowCount } = await pool.query('DELETE FROM especialidades WHERE id = $1', [id]);
-  if (rowCount === 0) return reply.status(404).send({ error: 'Especialidade não encontrada' });
-  return reply.status(204).send();
+  try {
+    await prisma.especialidades.delete({ where: { id: Number(id) } });
+    return reply.status(204).send();
+  } catch (err) {
+    if (err.code === 'P2025') return reply.status(404).send({ error: 'Especialidade não encontrada' });
+    throw err;
+  }
 }
 
 module.exports = { list, create, update, remove };

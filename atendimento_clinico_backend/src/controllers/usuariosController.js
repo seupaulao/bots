@@ -1,43 +1,56 @@
-const pool = require('../config/database');
+const prisma = require('../config/database');
 const bcrypt = require('bcrypt');
 
 async function list(request, reply) {
   const { perfil } = request.query;
-  let query = `
-    SELECT u.id, u.nome, u.cpf, u.email, u.telefone, u.whatsapp, u.telegram,
-           u.nascimento, u.conselho, u.dt_inicio, u.dt_fim, s.perfil
-    FROM usuarios u
-    LEFT JOIN seguranca s ON s.id_usuario = u.id
-  `;
-  const params = [];
+  const where = perfil
+    ? { seguranca: { perfil } }
+    : {};
 
-  if (perfil) {
-    query += ' WHERE s.perfil = $1';
-    params.push(perfil);
-  }
+  const rows = await prisma.usuarios.findMany({
+    where,
+    include: { seguranca: { select: { perfil: true } } },
+    orderBy: { nome: 'asc' },
+  });
 
-  query += ' ORDER BY u.nome';
-
-  const { rows } = await pool.query(query, params);
-  return rows;
+  return rows.map(u => ({
+    id: u.id,
+    nome: u.nome,
+    cpf: u.cpf,
+    email: u.email,
+    telefone: u.telefone,
+    whatsapp: u.whatsapp,
+    telegram: u.telegram,
+    nascimento: u.nascimento,
+    conselho: u.conselho,
+    dt_inicio: u.dt_inicio,
+    dt_fim: u.dt_fim,
+    perfil: u.seguranca?.perfil || null,
+  }));
 }
 
 async function getById(request, reply) {
   const { id } = request.params;
-  const { rows } = await pool.query(
-    `SELECT u.*, s.perfil,
-            COALESCE(json_agg(json_build_object('id', e.id, 'nome', e.nome)) FILTER (WHERE e.id IS NOT NULL), '[]') AS especialidades
-     FROM usuarios u
-     LEFT JOIN seguranca s ON s.id_usuario = u.id
-     LEFT JOIN usuario_especialidade ue ON ue.id_usuario = u.id
-     LEFT JOIN especialidades e ON e.id = ue.id_especialidade
-     WHERE u.id = $1
-     GROUP BY u.id, s.perfil`,
-    [id]
-  );
 
-  if (rows.length === 0) return reply.status(404).send({ error: 'Usuário não encontrado' });
-  return rows[0];
+  const row = await prisma.usuarios.findUnique({
+    where: { id: Number(id) },
+    include: {
+      seguranca: { select: { perfil: true } },
+      usuarioEspecialidade: {
+        include: { especialidade: { select: { id: true, nome: true } } },
+      },
+    },
+  });
+
+  if (!row) return reply.status(404).send({ error: 'Usuário não encontrado' });
+
+  return {
+    ...row,
+    perfil: row.seguranca?.perfil || null,
+    seguranca: undefined,
+    usuarioEspecialidade: undefined,
+    especialidades: row.usuarioEspecialidade.map(ue => ue.especialidade),
+  };
 }
 
 async function create(request, reply) {
@@ -45,32 +58,26 @@ async function create(request, reply) {
 
   if (!nome || !cpf) return reply.status(400).send({ error: 'Nome e CPF são obrigatórios' });
 
-  const client = await pool.connect();
   try {
-    await client.query('BEGIN');
+    const result = await prisma.$transaction(async (tx) => {
+      const user = await tx.usuarios.create({
+        data: { nome, cpf, email, telefone, whatsapp, telegram, nascimento: nascimento || null, conselho: conselho || null },
+      });
 
-    const { rows: userRows } = await client.query(
-      `INSERT INTO usuarios (nome, cpf, email, telefone, whatsapp, telegram, nascimento, conselho)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
-      [nome, cpf, email, telefone, whatsapp, telegram, nascimento || null, conselho || null]
-    );
+      if (perfil && senha) {
+        const hash = await bcrypt.hash(senha, 10);
+        await tx.seguranca.create({
+          data: { id_usuario: user.id, perfil, senha: hash },
+        });
+      }
 
-    if (perfil && senha) {
-      const hash = await bcrypt.hash(senha, 10);
-      await client.query(
-        'INSERT INTO seguranca (id_usuario, perfil, senha) VALUES ($1, $2, $3)',
-        [userRows[0].id, perfil, hash]
-      );
-    }
+      return user;
+    });
 
-    await client.query('COMMIT');
-    return reply.status(201).send(userRows[0]);
+    return reply.status(201).send(result);
   } catch (err) {
-    await client.query('ROLLBACK');
-    if (err.code === '23505') return reply.status(409).send({ error: 'CPF já cadastrado' });
+    if (err.code === 'P2002') return reply.status(409).send({ error: 'CPF já cadastrado' });
     throw err;
-  } finally {
-    client.release();
   }
 }
 
@@ -78,31 +85,30 @@ async function update(request, reply) {
   const { id } = request.params;
   const { nome, cpf, email, telefone, whatsapp, telegram, nascimento, conselho, dt_inicio, dt_fim } = request.body;
 
-  const fields = [];
-  const params = [];
-  let idx = 1;
+  const data = {};
+  if (nome !== undefined) data.nome = nome;
+  if (cpf !== undefined) data.cpf = cpf;
+  if (email !== undefined) data.email = email;
+  if (telefone !== undefined) data.telefone = telefone;
+  if (whatsapp !== undefined) data.whatsapp = whatsapp;
+  if (telegram !== undefined) data.telegram = telegram;
+  if (nascimento !== undefined) data.nascimento = nascimento;
+  if (conselho !== undefined) data.conselho = conselho;
+  if (dt_inicio !== undefined) data.dt_inicio = dt_inicio;
+  if (dt_fim !== undefined) data.dt_fim = dt_fim;
 
-  if (nome !== undefined) { fields.push(`nome = $${idx++}`); params.push(nome); }
-  if (cpf !== undefined) { fields.push(`cpf = $${idx++}`); params.push(cpf); }
-  if (email !== undefined) { fields.push(`email = $${idx++}`); params.push(email); }
-  if (telefone !== undefined) { fields.push(`telefone = $${idx++}`); params.push(telefone); }
-  if (whatsapp !== undefined) { fields.push(`whatsapp = $${idx++}`); params.push(whatsapp); }
-  if (telegram !== undefined) { fields.push(`telegram = $${idx++}`); params.push(telegram); }
-  if (nascimento !== undefined) { fields.push(`nascimento = $${idx++}`); params.push(nascimento); }
-  if (conselho !== undefined) { fields.push(`conselho = $${idx++}`); params.push(conselho); }
-  if (dt_inicio !== undefined) { fields.push(`dt_inicio = $${idx++}`); params.push(dt_inicio); }
-  if (dt_fim !== undefined) { fields.push(`dt_fim = $${idx++}`); params.push(dt_fim); }
+  if (Object.keys(data).length === 0) return reply.status(400).send({ error: 'Nenhum campo para atualizar' });
 
-  if (fields.length === 0) return reply.status(400).send({ error: 'Nenhum campo para atualizar' });
-
-  params.push(id);
-  const { rows } = await pool.query(
-    `UPDATE usuarios SET ${fields.join(', ')} WHERE id = $${idx} RETURNING *`,
-    params
-  );
-
-  if (rows.length === 0) return reply.status(404).send({ error: 'Usuário não encontrado' });
-  return rows[0];
+  try {
+    const row = await prisma.usuarios.update({
+      where: { id: Number(id) },
+      data,
+    });
+    return row;
+  } catch (err) {
+    if (err.code === 'P2025') return reply.status(404).send({ error: 'Usuário não encontrado' });
+    throw err;
+  }
 }
 
 async function addEspecialidade(request, reply) {
@@ -112,25 +118,26 @@ async function addEspecialidade(request, reply) {
   if (!id_especialidade) return reply.status(400).send({ error: 'id_especialidade é obrigatório' });
 
   try {
-    const { rows } = await pool.query(
-      'INSERT INTO usuario_especialidade (id_usuario, id_especialidade) VALUES ($1, $2) RETURNING *',
-      [id, id_especialidade]
-    );
-    return reply.status(201).send(rows[0]);
+    const row = await prisma.usuario_especialidade.create({
+      data: { id_usuario: Number(id), id_especialidade: Number(id_especialidade) },
+    });
+    return reply.status(201).send(row);
   } catch (err) {
-    if (err.code === '23505') return reply.status(409).send({ error: 'Vínculo já existe' });
+    if (err.code === 'P2002') return reply.status(409).send({ error: 'Vínculo já existe' });
     throw err;
   }
 }
 
 async function removeEspecialidade(request, reply) {
   const { id, idEsp } = request.params;
-  const { rowCount } = await pool.query(
-    'DELETE FROM usuario_especialidade WHERE id_usuario = $1 AND id_especialidade = $2',
-    [id, idEsp]
-  );
-  if (rowCount === 0) return reply.status(404).send({ error: 'Vínculo não encontrado' });
-  return reply.status(204).send();
+  try {
+    await prisma.usuario_especialidade.deleteMany({
+      where: { id_usuario: Number(id), id_especialidade: Number(idEsp) },
+    });
+    return reply.status(204).send();
+  } catch (err) {
+    return reply.status(404).send({ error: 'Vínculo não encontrado' });
+  }
 }
 
 module.exports = { list, getById, create, update, addEspecialidade, removeEspecialidade };

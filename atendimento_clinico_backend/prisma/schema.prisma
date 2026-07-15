@@ -1,0 +1,111 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model usuarios {
+  id         Int       @id @default(autoincrement())
+  nome       String
+  cpf        String    @unique
+  email      String?
+  telefone   String?
+  whatsapp   String?
+  telegram   String?
+  nascimento DateTime?
+  conselho   String?
+  dt_inicio  DateTime  @default(now())
+  dt_fim     DateTime?
+
+  seguranca                        seguranca?
+  usuarioEspecialidade             usuario_especialidade[]
+  campanhaProfissionalEspecialidade campanha_profissional_especialidade[]
+  atendimentos                     atendimentos[]             @relation("atendimentos_paciente")
+  anamneses                        anamneses[]                @relation("anamneses_paciente")
+}
+
+model seguranca {
+  id        Int    @id @default(autoincrement())
+  id_usuario Int   @unique
+  perfil    String
+  senha     String
+
+  usuario usuarios @relation(fields: [id_usuario], references: [id], onDelete: Cascade)
+}
+
+model especialidades {
+  id   Int    @id @default(autoincrement())
+  nome String @unique
+
+  usuarioEspecialidade             usuario_especialidade[]
+  campanhaProfissionalEspecialidade campanha_profissional_especialidade[]
+}
+
+model usuario_especialidade {
+  id              Int @id @default(autoincrement())
+  id_usuario      Int
+  id_especialidade Int
+
+  usuario       usuarios       @relation(fields: [id_usuario], references: [id], onDelete: Cascade)
+  especialidade especialidades @relation(fields: [id_especialidade], references: [id], onDelete: Cascade)
+
+  @@unique([id_usuario, id_especialidade])
+}
+
+model campanhas {
+  id          Int      @id @default(autoincrement())
+  nome        String
+  data        DateTime
+  hora        String
+  data_criacao DateTime @default(now())
+
+  campanhaProfissionalEspecialidade campanha_profissional_especialidade[]
+  atendimentos                      atendimentos[]
+}
+
+model campanha_profissional_especialidade {
+  id                   Int    @id @default(autoincrement())
+  id_campanha          Int
+  id_usuario           Int
+  id_especialidade     Int
+  identificador_acesso String @default(uuid())
+
+  campanha      campanhas      @relation(fields: [id_campanha], references: [id], onDelete: Cascade)
+  usuario       usuarios       @relation(fields: [id_usuario], references: [id], onDelete: Cascade)
+  especialidade especialidades @relation(fields: [id_especialidade], references: [id], onDelete: Cascade)
+  atendimentos  atendimentos[]
+  anamneses     anamneses[]
+
+  @@unique([id_campanha, id_usuario, id_especialidade])
+}
+
+model atendimentos {
+  id                            Int      @id @default(autoincrement())
+  data_hora_atendimento         DateTime
+  id_campanha                   Int
+  id_usuario_paciente           Int
+  id_profissional_especialidade Int
+  status                        String   @default("agendado")
+  foi_concluido                 Boolean  @default(false)
+  houve_desistencia             Boolean  @default(false)
+
+  campanha                   campanhas                           @relation(fields: [id_campanha], references: [id], onDelete: Cascade)
+  usuarioPaciente            usuarios                            @relation("atendimentos_paciente", fields: [id_usuario_paciente], references: [id], onDelete: Cascade)
+  profissionalEspecialidade  campanha_profissional_especialidade @relation(fields: [id_profissional_especialidade], references: [id], onDelete: Cascade)
+}
+
+model anamneses {
+  id                            Int      @id @default(autoincrement())
+  tipo                          String
+  descricao                     String?
+  texto                         String?
+  id_paciente                   Int
+  id_profissional_especialidade Int
+  data_criacao                  DateTime @default(now())
+
+  paciente                  usuarios                            @relation("anamneses_paciente", fields: [id_paciente], references: [id], onDelete: Cascade)
+  profissionalEspecialidade campanha_profissional_especialidade @relation(fields: [id_profissional_especialidade], references: [id], onDelete: Cascade)
+}

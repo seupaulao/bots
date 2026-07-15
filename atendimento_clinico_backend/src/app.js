@@ -1,7 +1,8 @@
 const fastify = require('fastify');
 const cors = require('@fastify/cors');
 const fjwt = require('@fastify/jwt');
-const pool = require('./config/database');
+const prisma = require('./config/database');
+const bcrypt = require('bcrypt');
 
 function buildApp() {
   const app = fastify({ logger: true });
@@ -27,14 +28,28 @@ function buildApp() {
   });
 
   app.decorate('seed', async () => {
-    const { rows } = await pool.query('SELECT COUNT(*)::int AS total FROM seguranca');
-    if (rows[0].total === 0) {
-      const bcrypt = require('bcrypt');
+    const total = await prisma.seguranca.count();
+    if (total === 0) {
+      const user = await prisma.usuarios.upsert({
+        where: { cpf: '81784244368' },
+        update: {},
+        create: {
+          nome: 'PAULO CESAR SILVA JUNIOR',
+          cpf: '81784244368',
+          email: 'seupaulao@gmail.com',
+          telegram: '+5585985907180',
+        },
+      });
       const hash = await bcrypt.hash('admin123', 10);
-      await pool.query(
-        `INSERT INTO seguranca (id_usuario, perfil, senha) VALUES ($1, $2, $3)`,
-        [1, 'admin', hash]
-      );
+      await prisma.seguranca.upsert({
+        where: { id_usuario: user.id },
+        update: {},
+        create: {
+          id_usuario: user.id,
+          perfil: 'admin',
+          senha: hash,
+        },
+      });
       console.log('Usuário admin seedado com sucesso');
     }
   });

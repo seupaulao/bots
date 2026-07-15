@@ -1,12 +1,12 @@
-const { Pool } = require('pg');
+const { PrismaClient } = require('@prisma/client');
 
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL || 'postgres://atendimento:atendimento123@localhost:5432/atendimento_clinico',
+const prisma = new PrismaClient({
+  log: process.env.NODE_ENV === 'development' ? ['query', 'warn', 'error'] : ['warn', 'error'],
 });
 
-pool.on('error', (err) => {
-  console.error('Erro inesperado no pool do PostgreSQL:', err);
+prisma.$connect().catch((err) => {
+  console.error('Erro ao conectar ao banco de dados:', err);
   process.exit(-1);
 });
 
-module.exports = pool;
+module.exports = prisma;

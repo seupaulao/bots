@@ -2,6 +2,7 @@
 
 nodejs
 fastify
+prisma ORM
 banco de dados postgres
 
 ## BANCO
@@ -61,11 +62,32 @@ anamneses
   * id profissional especialidade 
 
 ## inicialize o banco de dados
-insert into usuarios (nome, cpf, email, telegram, dt_inicio)
-values('PAULO CESAR SILVA JUNIOR','81784244368','seupaulao@gmail.com','+5585985907180',sysdate);
 
-insert into seguranca(id_usuario, perfil, senha)
-values(1, 'admin', 'admin123');
+```bash
+# Com Prisma, use migrações para criar as tabelas:
+npx prisma migrate dev --name init
+
+# Ou em produção:
+npx prisma migrate deploy
+
+# Seed padrão via prisma/seed.js:
+npx prisma db seed
+
+# O seed também roda automaticamente no startup do servidor
+```
+
+### Para usar
+
+```bash
+# Primeira vez — criar as tabelas no banco:
+npx prisma migrate dev --name init
+
+# Seed (admin):
+npx prisma db seed
+
+# Desenvolvimento:
+npm run dev
+```
 
 ## FLUXOS
 

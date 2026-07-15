@@ -1,42 +1,42 @@
-const pool = require('../config/database');
+const prisma = require('../config/database');
 
 async function list(request, reply) {
   const { status: filterStatus, campanha, paciente, profissional } = request.query;
-  let query = `
-    SELECT a.*, u.nome AS nome_paciente, prof.nome AS nome_profissional,
-           e.nome AS nome_especialidade, c.nome AS nome_campanha
-    FROM atendimentos a
-    JOIN usuarios u ON u.id = a.id_usuario_paciente
-    JOIN campanha_profissional_especialidade cpe ON cpe.id = a.id_profissional_especialidade
-    JOIN usuarios prof ON prof.id = cpe.id_usuario
-    JOIN especialidades e ON e.id = cpe.id_especialidade
-    JOIN campanhas c ON c.id = a.id_campanha
-    WHERE 1=1
-  `;
-  const params = [];
-  let idx = 1;
 
-  if (filterStatus) {
-    query += ` AND a.status = $${idx++}`;
-    params.push(filterStatus);
-  }
-  if (campanha) {
-    query += ` AND a.id_campanha = $${idx++}`;
-    params.push(campanha);
-  }
-  if (paciente) {
-    query += ` AND a.id_usuario_paciente = $${idx++}`;
-    params.push(paciente);
-  }
+  const where = {};
+
+  if (filterStatus) where.status = filterStatus;
+  if (campanha) where.id_campanha = Number(campanha);
+  if (paciente) where.id_usuario_paciente = Number(paciente);
   if (profissional) {
-    query += ` AND cpe.id_usuario = $${idx++}`;
-    params.push(profissional);
+    where.profissionalEspecialidade = { id_usuario: Number(profissional) };
   }
 
-  query += ' ORDER BY a.data_hora_atendimento';
+  const rows = await prisma.atendimentos.findMany({
+    where,
+    include: {
+      usuarioPaciente: { select: { nome: true } },
+      profissionalEspecialidade: {
+        include: {
+          usuario: { select: { nome: true } },
+          especialidade: { select: { nome: true } },
+        },
+      },
+      campanha: { select: { nome: true } },
+    },
+    orderBy: { data_hora_atendimento: 'asc' },
+  });
 
-  const { rows } = await pool.query(query, params);
-  return rows;
+  return rows.map(a => ({
+    ...a,
+    usuarioPaciente: undefined,
+    profissionalEspecialidade: undefined,
+    campanha: undefined,
+    nome_paciente: a.usuarioPaciente.nome,
+    nome_profissional: a.profissionalEspecialidade.usuario.nome,
+    nome_especialidade: a.profissionalEspecialidade.especialidade.nome,
+    nome_campanha: a.campanha.nome,
+  }));
 }
 
 async function create(request, reply) {
@@ -48,55 +48,79 @@ async function create(request, reply) {
     });
   }
 
-  const { rows: conflito } = await pool.query(
-    `SELECT id FROM atendimentos
-     WHERE id_profissional_especialidade = $1
-       AND data_hora_atendimento = $2
-       AND status NOT IN ('cancelado', 'desistencia')`,
-    [id_profissional_especialidade, data_hora_atendimento]
-  );
+  const conflito = await prisma.atendimentos.findFirst({
+    where: {
+      id_profissional_especialidade: Number(id_profissional_especialidade),
+      data_hora_atendimento: new Date(data_hora_atendimento),
+      status: { notIn: ['cancelado', 'desistencia'] },
+    },
+  });
 
-  if (conflito.length > 0) {
+  if (conflito) {
     return reply.status(409).send({ error: 'Horário já agendado para este profissional' });
   }
 
-  const { rows } = await pool.query(
-    `INSERT INTO atendimentos (data_hora_atendimento, id_campanha, id_usuario_paciente, id_profissional_especialidade)
-     VALUES ($1, $2, $3, $4) RETURNING *`,
-    [data_hora_atendimento, id_campanha, id_usuario_paciente, id_profissional_especialidade]
-  );
+  const row = await prisma.atendimentos.create({
+    data: {
+      data_hora_atendimento: new Date(data_hora_atendimento),
+      id_campanha: Number(id_campanha),
+      id_usuario_paciente: Number(id_usuario_paciente),
+      id_profissional_especialidade: Number(id_profissional_especialidade),
+    },
+  });
 
-  return reply.status(201).send(rows[0]);
+  return reply.status(201).send(row);
 }
 
 async function iniciar(request, reply) {
   const { id } = request.params;
-  const { rows } = await pool.query(
-    `UPDATE atendimentos SET status = 'em_andamento' WHERE id = $1 AND status = 'agendado' RETURNING *`,
-    [id]
-  );
-  if (rows.length === 0) return reply.status(400).send({ error: 'Atendimento não encontrado ou não está agendado' });
-  return rows[0];
+
+  try {
+    const row = await prisma.atendimentos.update({
+      where: { id: Number(id), status: 'agendado' },
+      data: { status: 'em_andamento' },
+    });
+    return row;
+  } catch (err) {
+    if (err.code === 'P2025') {
+      return reply.status(400).send({ error: 'Atendimento não encontrado ou não está agendado' });
+    }
+    throw err;
+  }
 }
 
 async function finalizar(request, reply) {
   const { id } = request.params;
-  const { rows } = await pool.query(
-    `UPDATE atendimentos SET status = 'concluido', foi_concluido = TRUE WHERE id = $1 AND status = 'em_andamento' RETURNING *`,
-    [id]
-  );
-  if (rows.length === 0) return reply.status(400).send({ error: 'Atendimento não encontrado ou não está em andamento' });
-  return rows[0];
+
+  try {
+    const row = await prisma.atendimentos.update({
+      where: { id: Number(id), status: 'em_andamento' },
+      data: { status: 'concluido', foi_concluido: true },
+    });
+    return row;
+  } catch (err) {
+    if (err.code === 'P2025') {
+      return reply.status(400).send({ error: 'Atendimento não encontrado ou não está em andamento' });
+    }
+    throw err;
+  }
 }
 
 async function desistencia(request, reply) {
   const { id } = request.params;
-  const { rows } = await pool.query(
-    `UPDATE atendimentos SET status = 'desistencia', houve_desistencia = TRUE WHERE id = $1 AND status = 'agendado' RETURNING *`,
-    [id]
-  );
-  if (rows.length === 0) return reply.status(400).send({ error: 'Atendimento não encontrado ou não está agendado' });
-  return rows[0];
+
+  try {
+    const row = await prisma.atendimentos.update({
+      where: { id: Number(id), status: 'agendado' },
+      data: { status: 'desistencia', houve_desistencia: true },
+    });
+    return row;
+  } catch (err) {
+    if (err.code === 'P2025') {
+      return reply.status(400).send({ error: 'Atendimento não encontrado ou não está agendado' });
+    }
+    throw err;
+  }
 }
 
 async function realocar(request, reply) {
@@ -107,12 +131,18 @@ async function realocar(request, reply) {
     return reply.status(400).send({ error: 'data_hora_atendimento é obrigatório' });
   }
 
-  const { rows } = await pool.query(
-    `UPDATE atendimentos SET data_hora_atendimento = $1 WHERE id = $2 AND status IN ('agendado', 'desistencia') RETURNING *`,
-    [data_hora_atendimento, id]
-  );
-  if (rows.length === 0) return reply.status(400).send({ error: 'Atendimento não encontrado ou não pode ser realocado' });
-  return rows[0];
+  try {
+    const row = await prisma.atendimentos.update({
+      where: { id: Number(id), status: { in: ['agendado', 'desistencia'] } },
+      data: { data_hora_atendimento: new Date(data_hora_atendimento) },
+    });
+    return row;
+  } catch (err) {
+    if (err.code === 'P2025') {
+      return reply.status(400).send({ error: 'Atendimento não encontrado ou não pode ser realocado' });
+    }
+    throw err;
+  }
 }
 
 async function continuar(request, reply) {
@@ -125,24 +155,22 @@ async function continuar(request, reply) {
       return reply.status(400).send({ error: 'nome e cpf da outra pessoa são obrigatórios' });
     }
 
-    const { rows: existing } = await pool.query('SELECT id FROM usuarios WHERE cpf = $1', [cpf]);
-    if (existing.length > 0) {
+    const existing = await prisma.usuarios.findUnique({ where: { cpf } });
+    if (existing) {
       return reply.status(200).send({
         message: 'Pessoa já cadastrada',
-        id_paciente: existing[0].id,
+        id_paciente: existing.id,
         id_campanha: Number(id_campanha),
       });
     }
 
-    const { rows: newUser } = await pool.query(
-      `INSERT INTO usuarios (nome, cpf, email, telefone, whatsapp, telegram, nascimento)
-       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
-      [nome, cpf, email, telefone, whatsapp, telegram, nascimento || null]
-    );
+    const newUser = await prisma.usuarios.create({
+      data: { nome, cpf, email, telefone, whatsapp, telegram, nascimento: nascimento || null },
+    });
 
     return reply.status(201).send({
       message: 'Pessoa cadastrada com sucesso',
-      id_paciente: newUser[0].id,
+      id_paciente: newUser.id,
       id_campanha: Number(id_campanha),
     });
   }

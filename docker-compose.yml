@@ -67,7 +67,6 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - ./atendimento_clinico_backend/banco.sql:/docker-entrypoint-initdb.d/banco.sql
       - pgdata-atendimento:/var/lib/postgresql/data
     networks:
       - app-network

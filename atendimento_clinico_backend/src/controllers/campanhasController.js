@@ -1,38 +1,49 @@
-const pool = require('../config/database');
+const prisma = require('../config/database');
 
 async function list(request, reply) {
-  const { rows } = await pool.query(`
-    SELECT c.*, COUNT(cpe.id)::int AS total_profissionais
-    FROM campanhas c
-    LEFT JOIN campanha_profissional_especialidade cpe ON cpe.id_campanha = c.id
-    GROUP BY c.id
-    ORDER BY c.data DESC, c.hora DESC
-  `);
-  return rows;
+  const rows = await prisma.campanhas.findMany({
+    include: {
+      _count: { select: { campanhaProfissionalEspecialidade: true } },
+    },
+    orderBy: [{ data: 'desc' }, { hora: 'desc' }],
+  });
+
+  return rows.map(c => ({
+    ...c,
+    total_profissionais: c._count.campanhaProfissionalEspecialidade,
+    _count: undefined,
+  }));
 }
 
 async function getById(request, reply) {
   const { id } = request.params;
-  const { rows } = await pool.query(`
-    SELECT c.*,
-           COALESCE(json_agg(json_build_object(
-             'id', cpe.id,
-             'id_usuario', cpe.id_usuario,
-             'nome_profissional', u.nome,
-             'id_especialidade', cpe.id_especialidade,
-             'nome_especialidade', e.nome,
-             'identificador_acesso', cpe.identificador_acesso
-           )) FILTER (WHERE cpe.id IS NOT NULL), '[]') AS profissionais
-    FROM campanhas c
-    LEFT JOIN campanha_profissional_especialidade cpe ON cpe.id_campanha = c.id
-    LEFT JOIN usuarios u ON u.id = cpe.id_usuario
-    LEFT JOIN especialidades e ON e.id = cpe.id_especialidade
-    WHERE c.id = $1
-    GROUP BY c.id
-  `, [id]);
 
-  if (rows.length === 0) return reply.status(404).send({ error: 'Campanha não encontrada' });
-  return rows[0];
+  const row = await prisma.campanhas.findUnique({
+    where: { id: Number(id) },
+    include: {
+      campanhaProfissionalEspecialidade: {
+        include: {
+          usuario: { select: { nome: true } },
+          especialidade: { select: { nome: true } },
+        },
+      },
+    },
+  });
+
+  if (!row) return reply.status(404).send({ error: 'Campanha não encontrada' });
+
+  return {
+    ...row,
+    campanhaProfissionalEspecialidade: undefined,
+    profissionais: row.campanhaProfissionalEspecialidade.map(cpe => ({
+      id: cpe.id,
+      id_usuario: cpe.id_usuario,
+      nome_profissional: cpe.usuario.nome,
+      id_especialidade: cpe.id_especialidade,
+      nome_especialidade: cpe.especialidade.nome,
+      identificador_acesso: cpe.identificador_acesso,
+    })),
+  };
 }
 
 async function create(request, reply) {
@@ -41,42 +52,46 @@ async function create(request, reply) {
     return reply.status(400).send({ error: 'nome, data e hora são obrigatórios' });
   }
 
-  const { rows } = await pool.query(
-    'INSERT INTO campanhas (nome, data, hora) VALUES ($1, $2, $3) RETURNING *',
-    [nome, data, hora]
-  );
-  return reply.status(201).send(rows[0]);
+  const row = await prisma.campanhas.create({
+    data: { nome, data: new Date(data), hora },
+  });
+  return reply.status(201).send(row);
 }
 
 async function update(request, reply) {
   const { id } = request.params;
   const { nome, data, hora } = request.body;
 
-  const fields = [];
-  const params = [];
-  let idx = 1;
+  const dataToUpdate = {};
+  if (nome !== undefined) dataToUpdate.nome = nome;
+  if (data !== undefined) dataToUpdate.data = new Date(data);
+  if (hora !== undefined) dataToUpdate.hora = hora;
 
-  if (nome !== undefined) { fields.push(`nome = $${idx++}`); params.push(nome); }
-  if (data !== undefined) { fields.push(`data = $${idx++}`); params.push(data); }
-  if (hora !== undefined) { fields.push(`hora = $${idx++}`); params.push(hora); }
+  if (Object.keys(dataToUpdate).length === 0) {
+    return reply.status(400).send({ error: 'Nenhum campo para atualizar' });
+  }
 
-  if (fields.length === 0) return reply.status(400).send({ error: 'Nenhum campo para atualizar' });
-
-  params.push(id);
-  const { rows } = await pool.query(
-    `UPDATE campanhas SET ${fields.join(', ')} WHERE id = $${idx} RETURNING *`,
-    params
-  );
-
-  if (rows.length === 0) return reply.status(404).send({ error: 'Campanha não encontrada' });
-  return rows[0];
+  try {
+    const row = await prisma.campanhas.update({
+      where: { id: Number(id) },
+      data: dataToUpdate,
+    });
+    return row;
+  } catch (err) {
+    if (err.code === 'P2025') return reply.status(404).send({ error: 'Campanha não encontrada' });
+    throw err;
+  }
 }
 
 async function remove(request, reply) {
   const { id } = request.params;
-  const { rowCount } = await pool.query('DELETE FROM campanhas WHERE id = $1', [id]);
-  if (rowCount === 0) return reply.status(404).send({ error: 'Campanha não encontrada' });
-  return reply.status(204).send();
+  try {
+    await prisma.campanhas.delete({ where: { id: Number(id) } });
+    return reply.status(204).send();
+  } catch (err) {
+    if (err.code === 'P2025') return reply.status(404).send({ error: 'Campanha não encontrada' });
+    throw err;
+  }
 }
 
 async function addProfissional(request, reply) {
@@ -88,14 +103,16 @@ async function addProfissional(request, reply) {
   }
 
   try {
-    const { rows } = await pool.query(
-      `INSERT INTO campanha_profissional_especialidade (id_campanha, id_usuario, id_especialidade)
-       VALUES ($1, $2, $3) RETURNING *`,
-      [id, id_usuario, id_especialidade]
-    );
-    return reply.status(201).send(rows[0]);
+    const row = await prisma.campanha_profissional_especialidade.create({
+      data: {
+        id_campanha: Number(id),
+        id_usuario: Number(id_usuario),
+        id_especialidade: Number(id_especialidade),
+      },
+    });
+    return reply.status(201).send(row);
   } catch (err) {
-    if (err.code === '23505') {
+    if (err.code === 'P2002') {
       return reply.status(409).send({ error: 'Profissional já vinculado a esta especialidade na campanha' });
     }
     throw err;
@@ -104,29 +121,39 @@ async function addProfissional(request, reply) {
 
 async function removeProfissional(request, reply) {
   const { id, idVinc } = request.params;
-  const { rowCount } = await pool.query(
-    'DELETE FROM campanha_profissional_especialidade WHERE id = $1 AND id_campanha = $2',
-    [idVinc, id]
-  );
-  if (rowCount === 0) return reply.status(404).send({ error: 'Vínculo não encontrado' });
-  return reply.status(204).send();
+  try {
+    await prisma.campanha_profissional_especialidade.deleteMany({
+      where: { id: Number(idVinc), id_campanha: Number(id) },
+    });
+    return reply.status(204).send();
+  } catch (err) {
+    return reply.status(404).send({ error: 'Vínculo não encontrado' });
+  }
 }
 
 async function disparar(request, reply) {
   const { id } = request.params;
-  const { rows } = await pool.query(`
-    SELECT c.nome AS campanha, u.nome, u.email, u.whatsapp, u.telegram,
-           cpe.identificador_acesso, e.nome AS especialidade
-    FROM campanha_profissional_especialidade cpe
-    JOIN campanhas c ON c.id = cpe.id_campanha
-    JOIN usuarios u ON u.id = cpe.id_usuario
-    JOIN especialidades e ON e.id = cpe.id_especialidade
-    WHERE cpe.id_campanha = $1
-  `, [id]);
+
+  const rows = await prisma.campanha_profissional_especialidade.findMany({
+    where: { id_campanha: Number(id) },
+    include: {
+      campanha: { select: { nome: true } },
+      usuario: { select: { nome: true, email: true, whatsapp: true, telegram: true } },
+      especialidade: { select: { nome: true } },
+    },
+  });
 
   return {
     message: `Notificações disparadas para ${rows.length} profissional(is)`,
-    profissionais: rows,
+    profissionais: rows.map(r => ({
+      campanha: r.campanha.nome,
+      nome: r.usuario.nome,
+      email: r.usuario.email,
+      whatsapp: r.usuario.whatsapp,
+      telegram: r.usuario.telegram,
+      identificador_acesso: r.identificador_acesso,
+      especialidade: r.especialidade.nome,
+    })),
   };
 }
 
@@ -138,53 +165,46 @@ async function inscricao(request, reply) {
     return reply.status(400).send({ error: 'nome e cpf são obrigatórios' });
   }
 
-  const { rows: campanhaRows } = await pool.query(
-    'SELECT id FROM campanhas WHERE id = $1', [id]
-  );
-  if (campanhaRows.length === 0) {
+  const campanha = await prisma.campanhas.findUnique({ where: { id: Number(id) } });
+  if (!campanha) {
     return reply.status(404).send({ error: 'Campanha não encontrada' });
   }
 
-  let idPaciente;
-  const { rows: existingUser } = await pool.query(
-    'SELECT id FROM usuarios WHERE cpf = $1', [cpf]
-  );
+  let existingUser = await prisma.usuarios.findUnique({ where: { cpf } });
 
-  if (existingUser.length > 0) {
-    idPaciente = existingUser[0].id;
-  } else {
-    const { rows: newUser } = await pool.query(
-      `INSERT INTO usuarios (nome, cpf, email, telefone, whatsapp, telegram, nascimento)
-       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
-      [nome, cpf, email, telefone, whatsapp, telegram, nascimento || null]
-    );
-    idPaciente = newUser[0].id;
+  if (!existingUser) {
+    existingUser = await prisma.usuarios.create({
+      data: { nome, cpf, email, telefone, whatsapp, telegram, nascimento: nascimento || null },
+    });
   }
 
   return reply.status(201).send({
     message: 'Inscrição realizada com sucesso',
     id_campanha: Number(id),
-    id_paciente: idPaciente,
+    id_paciente: existingUser.id,
   });
 }
 
 async function horariosDisponiveis(request, reply) {
   const { id } = request.params;
 
-  const { rows } = await pool.query(`
-    SELECT c.data, c.hora,
-           cpe.id AS id_profissional_especialidade,
-           u.nome AS profissional,
-           e.nome AS especialidade
-    FROM campanhas c
-    JOIN campanha_profissional_especialidade cpe ON cpe.id_campanha = c.id
-    JOIN usuarios u ON u.id = cpe.id_usuario
-    JOIN especialidades e ON e.id = cpe.id_especialidade
-    WHERE c.id = $1
-    ORDER BY u.nome, e.nome
-  `, [id]);
+  const rows = await prisma.campanha_profissional_especialidade.findMany({
+    where: { id_campanha: Number(id) },
+    include: {
+      campanha: { select: { data: true, hora: true } },
+      usuario: { select: { nome: true } },
+      especialidade: { select: { nome: true } },
+    },
+    orderBy: [{ usuario: { nome: 'asc' } }, { especialidade: { nome: 'asc' } }],
+  });
 
-  return rows;
+  return rows.map(r => ({
+    data: r.campanha.data,
+    hora: r.campanha.hora,
+    id_profissional_especialidade: r.id,
+    profissional: r.usuario.nome,
+    especialidade: r.especialidade.nome,
+  }));
 }
 
 module.exports = {
