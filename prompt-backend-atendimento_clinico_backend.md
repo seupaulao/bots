@@ -61,33 +61,7 @@ anamneses
   * id paciente
   * id profissional especialidade 
 
-## inicialize o banco de dados
 
-```bash
-# Com Prisma, use migrações para criar as tabelas:
-npx prisma migrate dev --name init
-
-# Ou em produção:
-npx prisma migrate deploy
-
-# Seed padrão via prisma/seed.js:
-npx prisma db seed
-
-# O seed também roda automaticamente no startup do servidor
-```
-
-### Para usar
-
-```bash
-# Primeira vez — criar as tabelas no banco:
-npx prisma migrate dev --name init
-
-# Seed (admin):
-npx prisma db seed
-
-# Desenvolvimento:
-npm run dev
-```
 
 ## FLUXOS
 
