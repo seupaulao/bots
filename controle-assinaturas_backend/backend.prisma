@@ -1,0 +1,299 @@
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ==========================================
+// ENUMS
+// ==========================================
+
+enum TipoAssinatura {
+  NONE
+  NOADSBANNER
+  PREMIUM
+}
+
+enum TipoFaturamento {
+  NONE
+  ONESHOT
+  DIARIO
+  SEMANAL
+  MENSAL
+  ANUAL
+}
+
+enum StatusContratacao {
+  PENDING
+  ACTIVE
+  CANCELED
+  EXPIRED
+  PAST_DUE
+  REFUNDED
+}
+
+enum StatusPagamento {
+  PENDING
+  APPROVED
+  REJECTED
+  REFUNDED
+  CANCELED
+}
+
+enum ProvedorPagamento {
+  MANUAL
+  MERCADO_PAGO
+  STRIPE
+  GOOGLE_PLAY
+}
+
+enum StatusWebhook {
+  RECEIVED
+  PROCESSED
+  FAILED
+}
+
+// ==========================================
+// APLICATIVOS
+// ==========================================
+
+model Aplicativo {
+  id            String   @id @default(uuid()) @db.Uuid
+  nome          String   @db.VarChar(100)
+  identificador String   @unique @db.VarChar(80)
+  apiKeyHash    String   @db.VarChar(255)
+  ativo         Boolean  @default(true)
+  criadoEm      DateTime @default(now())
+  atualizadoEm  DateTime @updatedAt
+
+  usuarios      Usuario[]
+  planos        Plano[]
+  recursos      Recurso[]
+  webhooks      EventoWebhook[]
+}
+
+// ==========================================
+// USUARIOS
+// ==========================================
+
+model Usuario {
+  id             String   @id @default(uuid()) @db.Uuid
+  idAplicativo   String   @db.Uuid
+
+  nome           String   @db.VarChar(150)
+  email          String   @db.VarChar(255)
+  googleSub      String   @db.VarChar(255)
+
+  dataNascimento DateTime? @db.Date
+  ativo          Boolean  @default(true)
+
+  criadoEm       DateTime @default(now())
+  atualizadoEm   DateTime @updatedAt
+
+  aplicativo     Aplicativo @relation(
+    fields: [idAplicativo],
+    references: [id],
+    onDelete: Restrict
+  )
+
+  contratacoes   Contratacao[]
+
+  @@unique([id, idAplicativo])
+  @@unique([idAplicativo, email])
+  @@unique([idAplicativo, googleSub])
+  @@index([idAplicativo, ativo])
+}
+
+// ==========================================
+// PLANOS
+// ==========================================
+
+model Plano {
+  id              String @id @default(uuid()) @db.Uuid
+  idAplicativo    String @db.Uuid
+
+  nome            String @db.VarChar(100)
+  codigo          String @db.VarChar(80)
+
+  tipoAssinatura  TipoAssinatura
+  tipoFaturamento TipoFaturamento
+
+  valor           Decimal @default(0) @db.Decimal(10, 2)
+  moeda           String  @default("BRL") @db.Char(3)
+
+  ativo           Boolean  @default(true)
+  criadoEm        DateTime @default(now())
+  atualizadoEm    DateTime @updatedAt
+
+  aplicativo      Aplicativo @relation(
+    fields: [idAplicativo],
+    references: [id],
+    onDelete: Restrict
+  )
+
+  contratacoes    Contratacao[]
+  recursos        PlanoRecurso[]
+
+  @@unique([id, idAplicativo])
+  @@unique([idAplicativo, codigo])
+  @@index([idAplicativo, ativo])
+}
+
+// ==========================================
+// CONTRATACOES
+// ==========================================
+
+model Contratacao {
+  id                   String @id @default(uuid()) @db.Uuid
+
+  idAplicativo         String @db.Uuid
+  idUsuario            String @db.Uuid
+  idPlano              String @db.Uuid
+
+  status               StatusContratacao @default(PENDING)
+
+  valorContratado      Decimal @db.Decimal(10, 2)
+  moeda                String  @default("BRL") @db.Char(3)
+
+  origem               ProvedorPagamento
+  identificadorExterno String? @db.VarChar(255)
+
+  dataInicio           DateTime?
+  dataFim              DateTime?
+  canceladaEm          DateTime?
+
+  criadoEm             DateTime @default(now())
+  atualizadoEm         DateTime @updatedAt
+
+  usuario              Usuario @relation(
+    fields: [idUsuario, idAplicativo],
+    references: [id, idAplicativo],
+    onDelete: Restrict
+  )
+
+  plano                Plano @relation(
+    fields: [idPlano, idAplicativo],
+    references: [id, idAplicativo],
+    onDelete: Restrict
+  )
+
+  pagamentos           Pagamento[]
+
+  @@unique([id, idAplicativo])
+  @@unique([idAplicativo, origem, identificadorExterno])
+  @@index([idUsuario, status])
+  @@index([idPlano, status])
+  @@index([status, dataFim])
+}
+
+// ==========================================
+// PAGAMENTOS
+// ==========================================
+
+model Pagamento {
+  id                   String @id @default(uuid()) @db.Uuid
+
+  idAplicativo         String @db.Uuid
+  idContratacao        String @db.Uuid
+
+  valor                Decimal @db.Decimal(10, 2)
+  moeda                String  @default("BRL") @db.Char(3)
+
+  status               StatusPagamento @default(PENDING)
+
+  provedor             ProvedorPagamento
+  identificadorExterno String? @db.VarChar(255)
+
+  dataPagamento        DateTime?
+  criadoEm             DateTime @default(now())
+
+  contratacao          Contratacao @relation(
+    fields: [idContratacao, idAplicativo],
+    references: [id, idAplicativo],
+    onDelete: Restrict
+  )
+
+  @@unique([idAplicativo, provedor, identificadorExterno])
+  @@index([idContratacao, status])
+}
+
+// ==========================================
+// RECURSOS
+// ==========================================
+
+model Recurso {
+  id            String @id @default(uuid()) @db.Uuid
+  idAplicativo  String @db.Uuid
+
+  codigo        String @db.VarChar(100)
+  descricao     String @db.VarChar(255)
+
+  aplicativo    Aplicativo @relation(
+    fields: [idAplicativo],
+    references: [id],
+    onDelete: Restrict
+  )
+
+  planos        PlanoRecurso[]
+
+  @@unique([id, idAplicativo])
+  @@unique([idAplicativo, codigo])
+}
+
+// ==========================================
+// PLANO_RECURSO
+// ==========================================
+
+model PlanoRecurso {
+  idPlano       String @db.Uuid
+  idRecurso     String @db.Uuid
+  idAplicativo  String @db.Uuid
+
+  plano         Plano @relation(
+    fields: [idPlano, idAplicativo],
+    references: [id, idAplicativo],
+    onDelete: Cascade
+  )
+
+  recurso       Recurso @relation(
+    fields: [idRecurso, idAplicativo],
+    references: [id, idAplicativo],
+    onDelete: Cascade
+  )
+
+  @@id([idPlano, idRecurso])
+  @@index([idRecurso])
+}
+
+// ==========================================
+// EVENTOS WEBHOOK
+// ==========================================
+
+model EventoWebhook {
+  id                   String @id @default(uuid()) @db.Uuid
+  idAplicativo         String @db.Uuid
+
+  provedor             ProvedorPagamento
+  identificadorExterno String @db.VarChar(255)
+
+  status               StatusWebhook @default(RECEIVED)
+
+  payload              Json
+
+  recebidoEm           DateTime @default(now())
+  processadoEm         DateTime?
+  erro                 String? @db.Text
+
+  aplicativo           Aplicativo @relation(
+    fields: [idAplicativo],
+    references: [id],
+    onDelete: Restrict
+  )
+
+  @@unique([idAplicativo, provedor, identificadorExterno])
+  @@index([idAplicativo, status])
+  @@index([status, recebidoEm])
+}
